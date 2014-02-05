@@ -1,0 +1,309 @@
+#+STARTUP: showall
+
+* Emacs the shortway
+
+[[file:img/emacs-intro.png]]
+
+Oh! Emacs, el sistema operativo que resulta que tiene un editor
+incorporado y al que solo le falta el [[http://www.teuton.org/~ejm/emacsicon/][fregadero de la cocina]], aunque
+incomprendido por muchos, alabado por otros y quizás hasta [[https://plus.google.com/%2BLinusTorvalds/posts/iySKQGtkmtb][odiados por
+alguna minoría]] es, desde luego, una pieza de software que no te
+dejará indiferente.
+
+¿Qué es Emacs? Pues un intérprete de [[http://es.wikipedia.org/wiki/Emacs_Lisp][EmacsLisp]].
+
+A diferencia de otros editores, Emacs /no utiliza un lenguaje de
+extensión/ junto a una API que puedes usar para escribir extensiones,
+es más correcto pensar en Emacs como un intérprete sobre el cual se ha
+construido un framework para editar texto pero nada le impide ampliar
+este framework para soportar otras tareas como interactuar con una
+base de datos o con un terminal o con un servidor de mensajería.
+
+Analizando con [[http://www.dwheeler.com/sloccount/][sloccount]] el código fuente de Emacs:
+
+#+BEGIN_SRC sh
+  Totals grouped by language (dominant language first):
+  lisp:       1068797 (77.75%)
+  ansic:       280312 (20.39%)
+  objc:         15002 (1.09%)
+  sh:            6263 (0.46%)
+  perl:          1277 (0.09%)
+  pascal:        1010 (0.07%)
+  cs:             770 (0.06%)
+  cpp:            528 (0.04%)
+  awk:            477 (0.03%)
+  ruby:           257 (0.02%)
+  java:            27 (0.00%)
+#+END_SRC
+
+vemos que cerca del 20% del código está escrito en C (unas 280 mil
+líneas), esto es básicamente la implementación de un intérprete de
+EmacsLisp, el casi 78% restante es código EmacsLisp (alrededor de 1
+millón de líneas) que no es más que el framework que le da el carácter
+de editor de texto entre otras cosas a Emacs.
+
+De hecho, generar el ejecutable de Emacs requiere dos pasos:
+
+1. Compilar el código C que genera un ejecutable llamado ~temacs~ y
+   que es puramente un intérprete de EmacsLisp + rutinas de I/O.
+2. El ejecutable ~temacs~ se ejecuta para cargar la librería estándard
+   escrita en EmacsLisp y volcar todo a un ejecutable con esas
+   librerías pre-cargadas por razones de eficiencia.
+  
+Al último ejecutable es a lo que conocemos como Emacs.
+
+¿Qué diferencia significa el hecho que sea un intérprete?
+
+Entre otras cosas, que *absolutamente todo* lo que haces en el
+programa, en última instancia, invoca a una función escrita en
+EmacsLisp (la mayoría) o en C (por razones de eficiencia).
+
+Por ejemplo, el atajo de teclado ~<Alt> - m~ posiciona el cursor en el
+primer caracter de la línea que sea un espacio o un tabulador, pero si
+buscamos la ayuda de este comando nos dice lo siguiente:
+
+#+BEGIN_SRC
+M-m runs the command back-to-indentation, which is an interactive
+compiled Lisp function in `simple.el'.
+
+It is bound to M-m.
+
+(back-to-indentation)
+
+Move point to the first non-whitespace character on this line.
+#+END_SRC
+
+- La funcionalidad tiene un nombre: /back-to-indentation/
+- Está definida en un sitio concreto: /simple.el/ que es un enlace al
+  archivo del mismo nombre que no es más que código EmacsLisp, al que
+  puedes acceder interactivamente y ver su implementación:
+  #+BEGIN_SRC elisp
+    (defun back-to-indentation ()
+      "Move point to the first non-whitespace character on this line."
+      (interactive "^")
+      (beginning-of-line 1)
+      (skip-syntax-forward " " (line-end-position))
+      ;; Move back over chars that have whitespace syntax but have the p flag.
+      (backward-prefix-chars))
+  #+END_SRC
+- La documentación te dice a qué atajo está asociada la función. Es más,
+  si cambias el atajo, el cambio será reflejado en la documentación.
+- Como la funcionalidad no es más que una función de EmacsLisp puedes
+  crear tu propia versión de la función y que Emacs utilice esa para
+  lo cual ni tienes que reiniciar el programa ni compilar nada, solo
+  evaluar (recuerda que es un intérprete) la función que defines y
+  listo.
+
+Este es el gran conocimiento que Emacs tiene sobre sí mismo y el hecho
+de que puedas programar o re-programar toda su funcionalidad
+(incluyendo las funciones escritas en C) para tu propia conveniencia
+es lo que más me fascina, después de todo soy un programador no? :)
+
+La misma funcionalidad en [[http://www.vim.org/][VIM]] por ejemplo está mapeada
+a al atajo ~^~ en modo normal, si buscamos la ayuda del comando
+(~:help ^~) obtenemos lo siguiente:
+
+#+BEGIN_SRC
+                                                        ^
+^                       To the first non-blank character of the line.
+                        exclusive motion.
+#+END_SRC
+
+- Para VIM ~^~ es simplemente ~^~. No tiene un nombre como en el caso
+  de Emacs.
+- No puedes acceder a su implementación de forma interactiva, para
+  acceder a ella tienes que bucear en el código. ~src/normal.c~:
+  #+BEGIN_SRC c
+    // ...
+    
+        {'^',       nv_beginline,   0,                      BL_WHITE | BL_FIX},
+    
+    // ...
+    
+    /*
+     ,* "0" and "^" commands.
+     ,* cap->arg is the argument for beginline().
+     ,*/
+        static void
+    nv_beginline(cap)
+        cmdarg_T    *cap;
+    {
+        cap->oap->motion_type = MCHAR;
+        cap->oap->inclusive = FALSE;
+        beginline(cap->arg);
+    #ifdef FEAT_FOLDING
+        if ((fdo_flags & FDO_HOR) && KeyTyped && cap->oap->op_type == OP_NOP)
+            foldOpenCursor();
+    #endif
+        ins_at_eol = FALSE;     /* Don't move cursor past eol (only necessary in a
+                                   one-character line). */
+    }
+  #+END_SRC
+- La ayuda no es más que una sección de un fichero de texto estático
+  que alguien escribió. Si haces un ~remap~ de la funcionalidad y
+  vuelves a consultar la ayuda verás que te sigue diciendo lo mismo.
+- La funcionalidad de ~^~ no puede ser re-escrita utilizando vimscript.
+
+Es decir, VIM  no es un "sistema vivo" en la forma en que Emacs
+lo es.
+
+/Disclaimer/: No intento iniciar otra guerra santa, he utilizado como
+ejemplo VIM porque es lo que utilizaba antes y era muy feliz, me encantaba!
+Hoy en día utilizo Emacs porque se adapta mejor a mis necesidades: aprender
+Lisp, funcionalidades de IDE, etc.
+
+** Terminología
+*** modo
+Citando a [[http://es.wikipedia.org/wiki/Emacs#Modos_de_edici.C3.B3n][Wikipedia]]:
+
+#+BEGIN_QUOTE
+Emacs adapta su comportamiento al tipo de texto que está editando
+mediante modos de edición llamados "modos mayores" ("major
+modes"). Los modos mayores se definen para textos de texto ordinario,
+código fuente para diversos lenguajes de programación, documentos
+HTML, TeX y LaTeX y muchos otros tipos de texto. Cada modo mayor
+modifica ciertas variables en Lisp para que Emacs se comporte de forma
+más conveniente para ese tipo concreto de texto. Los modos mayores
+también ofrecen comandos especiales de edición. Por ejemplo, los modos
+mayores para lenguajes de programación definen habitualmente comandos
+para saltar al principio o al final de una función.
+
+El comportamiento de Emacs puede ser más personalizado aún utilizando
+los "modos menores" ("minor modes"). Mientras que sólo se puede
+asociar un modo mayor con un buffer a la vez, se puede tener activos
+varios modos menores. Por ejemplo, el modo mayor para el lenguaje de
+programación C define un modo menor diferente para cada uno de los
+estilos de indentación más populares.
+#+END_QUOTE
+
+Es decir, un modo mayor viene siendo lo que el [[http://vimdoc.sourceforge.net/htmldoc/filetype.html][filetype]] es para VIM y
+los modos menores son como si fueran plugins que puedes auto-activar
+para ciertos filetypes o de forma globals.
+
+*** modeline
+El modeline o línea de modos es la línea que aparece abajo del todo y
+que se le llama de modos porque entre otras cosa te muestra los modos
+que están activos.
+
+[[file:img/emacs-modeline.png]]
+
+*** buffer
+Es lo que contiene el texto que estás editando. Cada vez que abres un
+fichero se crea un buffer con el mismo nombre que ese fichero y que
+contiene el texto del mismo.
+
+- El atajo ~C-x C-f~ que invoca al comando ~find-file~ se utiliza para
+  cargar un fichero en un buffer.
+- El atajo ~C-x b~ que invoca al comando ~switch-to-buffer~ se utiliza
+  para moverte entre varios buffers. 
+- El atajo ~C-x C-s~ que invoca al comando ~save-buffer~ se utiliza
+  para volcar el contenido del buffer a un fichero.
+- El comando ~rename-buffer~ se utiliza para cambiar el nombre del buffer.
+
+Los buffers pueden o no estar asociados a ficheros.
+Por convención los buffers que no están asociados a ficheros se
+escriben entre ~*~, por ejemplo, el buffer ~*scratch*~ es un buffer
+que no está asociado a ningún fichero.
+El nombre de un buffer y el fichero al que está asociado son cosas independientes,
+puedes renombrar un buffer que está asociado a un fichero y guardar ~C-x C-s~ y seguirá
+guardándose en el mismo fichero.
+
+*** window
+Un window en Emacs es la región que encierra un buffer y que tiene un modeline.
+La siguiente imagen muestra 4 ventanas:
+
+[[file:img/emacs-windows.png]]
+
+*** frame
+Un frame no es más que una ventana GUI.
+
+[[file:img/frame.png]]
+
+*** meta
+Meta es probablemente lo mismo que tu tecla Alt y se abrevia ~M~ en
+los comandos, por ejemplo: el comando ~M-x~ significa ~<Alt> - x~.
+
+*** control
+Es tu tecla Ctrl y se abrevia ~C~ en los comandos, por ejemplo: el
+comando ~C-a~ significa ~<Ctrl> - a~.
+
+*** space
+Es tu tecla /espacio/ y se abrevia ~SPC~ en los comandos, por ejemplo: el
+comando ~C-SPC~ significa ~<Ctrl> - <Space>~.
+
+*** comando
+Un comando es una función del editor que se puede invocar a través de
+un /prompt/ que aparece al presionar ~M-x~.
+Es fácil distinguir estas funciones si estás mirando código EmacsLisp
+porque tienen la lista =(interactive)= en su definición.
+
+Por ejemplo, la función =back-to-indentation= es un comando.
+Su definición original es (fíjate en la línea con =(interactive)=):
+
+#+BEGIN_SRC elisp
+  (defun back-to-indentation ()
+    "Move point to the first non-whitespace character on this line."
+    (interactive "^")
+    (beginning-of-line 1)
+    (skip-syntax-forward " " (line-end-position))
+    ;; Move back over chars that have whitespace syntax but have the p flag.
+    (backward-prefix-chars))
+#+END_SRC
+
+Y por el hecho de ser un comando podemos invocarla directamente a
+través del prompt sin necesidad de un atajo, es más, al final eres
+tú el que decide qué comandos quieres tener mapeados a qué atajos de
+teclado /(solo los comandos se pueden mapear a atajos)/:
+
+1. Presiona ~M-x~
+2. Escribe ~back-to~ y da al tabulador para que autocomplete
+3. Intro
+
+El resultado es el mismo que invocar el comando con un atajo.
+
+Probemos con otro  ejemplo, hemos dicho que Emacs es  un intérprete de
+EmacsLisp no?  Pues eso significa que tendríamos que poder ejecutar el
+código  EmacsLisp   que  quisiéramos   no?   Pues  bien,   el  comando
+~eval-expression~ que  por defecto  está mapeado  a ~M-:~  nos permite
+precisamente esto:
+
+1. Presiona ~M-x~
+2. Escribe ~eval-expression~
+3. Intro
+4. Escribe: =(message "Estamos en el año: %s" (format-time-string "%Y"))=
+
+El resultado deberá aparecer debajo de la línea de modos.
+
+*** point
+El punto o /point/ no es más que la posición del cursor dentro del buffer.
+
+*** mark y mark-ring
+Emacs mantiene una estructura de datos que se llama /mark-ring/ que es
+una lista circular.  La marca o /mark/ es una posición del buffer que
+insertas al principio del /mark-ring/ (la lista circular).
+
+- ~C-SPC~ que invoca al comando =set-mark-command= inserta la
+  posición actual del cursor y si mueves el cursor sobresalta el texto.
+- ~C-SPC C-SPC~ que invoca al comando =set-mark-command= inserta la
+  posición actual del cursor sin sobresaltar el texto.
+- ~C-u C-SPC~ que invoca al mismo comando =set-mark-command= pero
+  mueve el cursor a la posición guardada al principio del /mark-ring/
+  y mueve esa posición al final del /mark-ring/ (rota la lista).
+
+Es decir, que puedes ir dejando rastros con ~C-SPC~ por todo el buffer
+y luego volver sobre tus pasos con ~C-u C-SPC~ volviendo a empezar
+cuando llegues al final del mark-ring.  El mark-ring por defecto tiene
+un máximo de tamaño de 16 marcas.
+
+*** region
+A la región del buffer entre el punto y la marca se le llama region y
+muchos comandos actúan sobre ella. Por ejemplo:
+
+- =comment-region= que comenta la region.
+- =kill-region= mapeado a ~C-w~ por defecto que corta el texto en la region.
+- =kill-ring-save= mapeado a ~M-w~ por defecto que copia el texto en la region.
+
+*** TODO kill-ring
+Emacs mantiene otra estructura de datos que se llama /kill-ring/ que
+es otra lista circular.
+
